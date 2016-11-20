@@ -1,0 +1,9 @@
+syntax: glob
+*~
+*.log
+*.test
+*.swp
+
+syntax: regexp
+(^|/)([^/]+)/\2$
+(^|/)\#[^/]+\#
