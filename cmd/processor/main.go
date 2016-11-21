@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	//ht "html/template"
 	"io/ioutil"
 	"log"
 	"os"
@@ -13,7 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	tt "text/template"
+	"text/template"
 )
 
 func main() {
@@ -31,6 +30,7 @@ func main() {
 	if err := s.splice(); err != nil {
 		log.Fatal(err)
 	}
+	log.Println("Completed.")
 }
 
 type uuid struct {
@@ -43,7 +43,7 @@ type settings struct {
 	outDir             string
 	htmlInputs         []string
 	codeInputs         []string
-	codeExcerpts       *tt.Template
+	codeExcerpts       *template.Template
 	emptyCommentRegexp *regexp.Regexp
 }
 
@@ -112,11 +112,16 @@ func (s *settings) parseCodeTemplates() error {
 	excerpts := make(map[string]string, len(s.codeInputs))
 
 	for _, pathIn := range s.codeInputs {
-		codeTemplate, err := tt.ParseFiles(pathIn)
+		lang := filepath.Ext(pathIn)
+		if len(lang) < 1 {
+			continue
+		}
+		lang = lang[1:]
+		codeTemplate, err := template.ParseFiles(pathIn)
 		if err != nil {
 			return err
 		}
-		lang := (filepath.Ext(pathIn))[1:]
+		log.Printf("Loading %v", pathIn)
 		for _, tpl := range codeTemplate.Templates() {
 			if tpl.Name() == filepath.Base(pathIn) {
 				continue
@@ -128,7 +133,7 @@ func (s *settings) parseCodeTemplates() error {
 				return err
 			}
 			str := string(s.emptyCommentRegexp.ReplaceAll(buf.Bytes(), nil))
-			str, err = s.pygmentize(lang, str)
+			str, err = s.pygmentize(lang, strings.TrimSpace(str))
 			if err != nil {
 				return err
 			}
@@ -136,7 +141,7 @@ func (s *settings) parseCodeTemplates() error {
 		}
 	}
 
-	codeExcerpts := tt.New("excerpts")
+	codeExcerpts := template.New("excerpts")
 	for uuid, content := range excerpts {
 		_, err := codeExcerpts.Parse(fmt.Sprintf("{{define %q}}%s{{end}}", uuid, content))
 		if err != nil {
