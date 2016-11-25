@@ -119,7 +119,8 @@ func (s *settings) parseCodeTemplates() error {
 		lang = lang[1:]
 		codeTemplate, err := template.ParseFiles(pathIn)
 		if err != nil {
-			return err
+			log.Printf("Ignoring error when loading %s: %v", pathIn, err)
+			continue
 		}
 		log.Printf("Loading %v", pathIn)
 		for _, tpl := range codeTemplate.Templates() {
@@ -189,6 +190,15 @@ func find(path string, extensions ...string) (string, []string, error) {
 		err = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
+			}
+			base := filepath.Base(p)
+			baseLen := len(base)
+			if base[:1] == "." || base[baseLen-1:] == "~" || base == "processor" {
+				if info.Mode().IsDir() {
+					return filepath.SkipDir
+				} else {
+					return nil
+				}
 			}
 			if info.Mode().IsRegular() {
 				if len(extensions) != 0 {

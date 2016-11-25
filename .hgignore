@@ -4,6 +4,11 @@ syntax: glob
 *.test
 *.swp
 
+build
+.idea
+.gradle
+out
+
 syntax: regexp
 (^|/)([^/]+)/\2$
 (^|/)\#[^/]+\#

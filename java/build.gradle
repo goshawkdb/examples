@@ -1,0 +1,20 @@
+apply plugin: 'java'
+apply plugin: 'java-library-distribution'
+apply plugin: 'maven'
+
+version 'dev'
+group 'io.goshawkdb'
+archivesBaseName = "goshawkdb-examples"
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile project(':java-client')
+    testCompile project(path: ':java-client', configuration: 'testFixtures')
+    testCompile group: 'junit', name: 'junit', version: '4.12'
+}
