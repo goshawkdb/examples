@@ -43,11 +43,10 @@ public class Untitled1 {
         Certs certs = new Certs();
         certs.addClusterCertificate("myGoshawkDBCluster", clusterCert.getBytes());
         certs.parseClientPEM(new StringReader(clientKeyPair));
-        ConnectionFactory cf = new ConnectionFactory();
-        try (Connection conn = cf.connect(certs, "hostname:7894")) {
-            // do some work
-        } finally {
-            cf.group.shutdownGracefully();
+        try (ConnectionFactory cf = new ConnectionFactory()) {
+            try (Connection conn = cf.connect(certs, "hostname:7894")) {
+                // do some work
+            }
         }
     }
 }
