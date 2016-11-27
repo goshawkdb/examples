@@ -15,14 +15,13 @@ public class Untitled2 {
         Certs certs = new Certs();
         certs.addClusterCertificate("myGoshawkDBCluster", clusterCert.getBytes());
         certs.parseClientPEM(new StringReader(clientKeyPair));
-        ConnectionFactory cf = new ConnectionFactory();
-        try (Connection conn = cf.connect(certs, "hostname")) {
-            String res = conn.runTransaction(txn ->
-                    "Hello World"
-            ).result;
-            System.out.println(res);
-        } finally {
-            cf.group.shutdownGracefully();
+        try (ConnectionFactory cf = new ConnectionFactory()) {
+            try (Connection conn = cf.connect(certs, "hostname")) {
+                String res = conn.runTransaction(txn ->
+                        "Hello World"
+                ).result;
+                System.out.println(res);
+            }
         }
     }
 }

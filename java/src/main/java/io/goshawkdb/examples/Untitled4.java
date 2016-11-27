@@ -18,35 +18,34 @@ public class Untitled4 {
         Certs certs = new Certs();
         certs.addClusterCertificate("myGoshawkDBCluster", clusterCert.getBytes());
         certs.parseClientPEM(new StringReader(clientKeyPair));
-        ConnectionFactory cf = new ConnectionFactory();
-        try (Connection conn = cf.connect(certs, "hostname")) {
+        try (ConnectionFactory cf = new ConnectionFactory()) {
+            try (Connection conn = cf.connect(certs, "hostname")) {
 
-            TransactionResult<String> outcome = conn.runTransaction(txn -> {
-                GoshawkObjRef root = txn.getRoots().get("myRoot1");
-                if (root == null) {
-                    throw new RuntimeException("No root 'myRoot1' found");
-                }
-                GoshawkObjRef obj = txn.createObject(ByteBuffer.wrap("a new value for a new object".getBytes()));
-                root.set(null, obj); // root now has a single reference to our new object
-                return "success!";
-            });
-            System.out.println("" + outcome.result + ", " + outcome.cause);
+                TransactionResult<String> outcome = conn.runTransaction(txn -> {
+                    GoshawkObjRef root = txn.getRoots().get("myRoot1");
+                    if (root == null) {
+                        throw new RuntimeException("No root 'myRoot1' found");
+                    }
+                    GoshawkObjRef obj = txn.createObject(ByteBuffer.wrap("a new value for a new object".getBytes()));
+                    root.set(null, obj); // root now has a single reference to our new object
+                    return "success!";
+                });
+                System.out.println("" + outcome.result + ", " + outcome.cause);
 
-            outcome = conn.runTransaction(txn -> {
-                GoshawkObjRef root = txn.getRoots().get("myRoot1");
-                if (root == null) {
-                    throw new RuntimeException("No root 'myRoot1' found");
-                }
-                GoshawkObjRef[] objs = root.getReferences();
-                ByteBuffer val = objs[0].getValue();
-                byte[] ary = new byte[val.limit()];
-                val.get(ary);
-                return new String(ary);
-            });
-            System.out.println("Found: " + outcome.result + ", " + outcome.cause);
+                outcome = conn.runTransaction(txn -> {
+                    GoshawkObjRef root = txn.getRoots().get("myRoot1");
+                    if (root == null) {
+                        throw new RuntimeException("No root 'myRoot1' found");
+                    }
+                    GoshawkObjRef[] objs = root.getReferences();
+                    ByteBuffer val = objs[0].getValue();
+                    byte[] ary = new byte[val.limit()];
+                    val.get(ary);
+                    return new String(ary);
+                });
+                System.out.println("Found: " + outcome.result + ", " + outcome.cause);
 
-        } finally {
-            cf.group.shutdownGracefully();
+            }
         }
     }
 }
