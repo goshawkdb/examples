@@ -17,7 +17,7 @@ public class Untitled2 {
         certs.parseClientPEM(new StringReader(clientKeyPair));
         ConnectionFactory cf = new ConnectionFactory();
         try (Connection conn = cf.connect(certs, "hostname")) {
-            final String res = conn.runTransaction(txn ->
+            String res = conn.runTransaction(txn ->
                     "Hello World"
             ).result;
             System.out.println(res);
