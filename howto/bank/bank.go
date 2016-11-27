@@ -3,6 +3,7 @@ package bank
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"goshawkdb.io/client"
 	"time"
@@ -19,7 +20,10 @@ func CreateBank(conn *client.Connection) (*Bank, error) {
 		if err != nil {
 			return nil, err
 		}
-		rootObj := roots["myRoot1"]
+		rootObj, found := roots["myRoot1"]
+		if !found {
+			return nil, errors.New("No root 'myRoot1' found")
+		}
 		return rootObj, rootObj.Set([]byte{})
 	})
 	if err != nil {

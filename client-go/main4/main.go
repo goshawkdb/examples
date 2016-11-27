@@ -1,8 +1,11 @@
 // {{define "c78fe028-b193-4755-8a23-e8b31b458ff8"}}
 package main
 
-import "goshawkdb.io/client"
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"goshawkdb.io/client"
+)
 
 const (
 	clusterCertPEM      = `...`
@@ -22,7 +25,10 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		rootObj := rootObjs["myRoot1"]
+		rootObj, found := rootObjs["myRoot1"]
+		if !found {
+			return nil, errors.New("No root 'myRoot1' found")
+		}
 		myObj, err := txn.CreateObject([]byte("a new value for a new object"))
 		if err != nil {
 			return nil, err
@@ -37,7 +43,10 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		rootObj := rootObjs["myRoot1"]
+		rootObj, found := rootObjs["myRoot1"]
+		if !found {
+			return nil, errors.New("No root 'myRoot1' found")
+		}
 		refs, err := rootObj.References()
 		if err != nil {
 			return nil, err

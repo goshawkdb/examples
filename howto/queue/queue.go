@@ -2,6 +2,7 @@
 package queue
 
 import (
+	"errors"
 	"goshawkdb.io/client"
 )
 
@@ -24,7 +25,10 @@ func NewQueue(conn *client.Connection) (*Queue, error) {
 		if err != nil {
 			return nil, err
 		}
-		rootObj := roots["myRoot1"]
+		rootObj, found := roots["myRoot1"]
+		if !found {
+			return nil, errors.New("No root 'myRoot1' found")
+		}
 		err = rootObj.Set([]byte{})
 		if err != nil {
 			return nil, err

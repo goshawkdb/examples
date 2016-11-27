@@ -40,11 +40,11 @@ public class Untitled1 {
             "-----END EC PRIVATE KEY-----";
 
     public static void main(final String[] args) throws Exception {
-        final Certs certs = new Certs();
+        Certs certs = new Certs();
         certs.addClusterCertificate("myGoshawkDBCluster", clusterCert.getBytes());
         certs.parseClientPEM(new StringReader(clientKeyPair));
         final ConnectionFactory cf = new ConnectionFactory();
-        try (final Connection conn = cf.connect(certs, "hostname:7894")) {
+        try (Connection conn = cf.connect(certs, "hostname:7894")) {
             // do some work
         } finally {
             cf.group.shutdownGracefully();

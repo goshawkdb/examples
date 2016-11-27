@@ -12,11 +12,11 @@ public class Untitled2 {
     private static final String clientKeyPair = "...";
 
     public static void main(final String[] args) throws Exception {
-        final Certs certs = new Certs();
+        Certs certs = new Certs();
         certs.addClusterCertificate("myGoshawkDBCluster", clusterCert.getBytes());
         certs.parseClientPEM(new StringReader(clientKeyPair));
-        final ConnectionFactory cf = new ConnectionFactory();
-        try (final Connection conn = cf.connect(certs, "hostname")) {
+        ConnectionFactory cf = new ConnectionFactory();
+        try (Connection conn = cf.connect(certs, "hostname")) {
             final String res = conn.runTransaction(txn ->
                     "Hello World"
             ).result;

@@ -8,32 +8,40 @@ import io.goshawkdb.client.Certs;
 import io.goshawkdb.client.Connection;
 import io.goshawkdb.client.ConnectionFactory;
 import io.goshawkdb.client.GoshawkObjRef;
+import io.goshawkdb.client.TransactionResult;
 
 public class Untitled3 {
     private static final String clusterCert = "...";
     private static final String clientKeyPair = "...";
 
     public static void main(final String[] args) throws Exception {
-        final Certs certs = new Certs();
+        Certs certs = new Certs();
         certs.addClusterCertificate("myGoshawkDBCluster", clusterCert.getBytes());
         certs.parseClientPEM(new StringReader(clientKeyPair));
-        final ConnectionFactory cf = new ConnectionFactory();
-        try (final Connection conn = cf.connect(certs, "hostname")) {
+        ConnectionFactory cf = new ConnectionFactory();
+        try (Connection conn = cf.connect(certs, "hostname")) {
 
-            final String res = conn.runTransaction(txn -> {
+            TransactionResult<String> outcome = conn.runTransaction(txn -> {
                 GoshawkObjRef root = txn.getRoots().get("myRoot1");
+                if (root == null) {
+                    throw new RuntimeException("No root 'myRoot1' found");
+                }
                 root.set(ByteBuffer.wrap("Hello".getBytes()));
                 return "success!";
-            }).result;
-            System.out.println(res);
+            });
+            System.out.println("" + outcome.result + ", " + outcome.cause);
 
-            final String found = conn.runTransaction(txn -> {
-                final ByteBuffer val = txn.getRoots().get("myRoot1").getValue();
-                final byte[] ary = new byte[val.limit()];
+            outcome = conn.runTransaction(txn -> {
+                GoshawkObjRef root = txn.getRoots().get("myRoot1");
+                if (root == null) {
+                    throw new RuntimeException("No root 'myRoot1' found");
+                }
+                ByteBuffer val = root.getValue();
+                byte[] ary = new byte[val.limit()];
                 val.get(ary);
                 return new String(ary);
-            }).result;
-            System.out.println("Found: " + found);
+            });
+            System.out.println("Found: " + outcome.result + ", " + outcome.cause);
 
         } finally {
             cf.group.shutdownGracefully();

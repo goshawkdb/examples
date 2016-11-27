@@ -1,9 +1,12 @@
 // {{define "8b4ed8a8-d495-45c7-9f93-ecf32289acc0"}}
 package main
 
-import "goshawkdb.io/client"
-import "encoding/binary"
-import "fmt"
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"goshawkdb.io/client"
+)
 
 const (
 	clusterCertPEM      = `...`
@@ -22,7 +25,10 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		rootObj := rootObjs["myRoot1"]
+		rootObj, found := rootObjs["myRoot1"]
+		if !found {
+			return nil, errors.New("No root 'myRoot1' found")
+		}
 		value := make([]byte, 8)
 		binary.LittleEndian.PutUint64(value, 42)
 		err = rootObj.Set(value)
@@ -38,7 +44,10 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		rootObj := rootObjs["myRoot1"]
+		rootObj, found := rootObjs["myRoot1"]
+		if !found {
+			return nil, errors.New("No root 'myRoot1' found")
+		}
 		value, err := rootObj.Value()
 		if err != nil {
 			return nil, err

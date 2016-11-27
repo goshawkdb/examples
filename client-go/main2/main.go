@@ -1,8 +1,10 @@
 // {{define "399af6d4-7892-4393-bb12-ec382849fa75"}}
 package main
 
-import "goshawkdb.io/client"
-import "fmt"
+import (
+	"fmt"
+	"goshawkdb.io/client"
+)
 
 const (
 	clusterCertPEM      = `...`
