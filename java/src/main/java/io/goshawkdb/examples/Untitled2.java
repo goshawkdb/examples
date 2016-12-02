@@ -6,6 +6,7 @@ import java.io.StringReader;
 import io.goshawkdb.client.Certs;
 import io.goshawkdb.client.Connection;
 import io.goshawkdb.client.ConnectionFactory;
+import io.goshawkdb.client.TransactionResult;
 
 public class Untitled2 {
     private static final String clusterCert = "...";
@@ -17,10 +18,10 @@ public class Untitled2 {
         certs.parseClientPEM(new StringReader(clientKeyPair));
         try (ConnectionFactory cf = new ConnectionFactory()) {
             try (Connection conn = cf.connect(certs, "hostname")) {
-                String res = conn.runTransaction(txn ->
+                TransactionResult<String> outcome = conn.runTransaction(txn ->
                         "Hello World"
-                ).result;
-                System.out.println(res);
+                );
+                System.out.println(outcome.getResultOrRethrow());
             }
         }
     }

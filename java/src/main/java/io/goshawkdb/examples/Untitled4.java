@@ -31,6 +31,7 @@ public class Untitled4 {
                     return "success!";
                 });
                 System.out.println("" + outcome.result + ", " + outcome.cause);
+                outcome.getResultOrRethrow();
 
                 outcome = conn.runTransaction(txn -> {
                     GoshawkObjRef root = txn.getRoots().get("myRoot1");
@@ -44,6 +45,7 @@ public class Untitled4 {
                     return new String(ary);
                 });
                 System.out.println("Found: " + outcome.result + ", " + outcome.cause);
+                outcome.getResultOrRethrow();
 
             }
         }
