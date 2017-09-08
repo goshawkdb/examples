@@ -10,28 +10,22 @@ import (
 )
 
 type Bank struct {
-	conn   *client.Connection
-	objRef client.ObjectRef
+	objRef client.RefCap
 }
 
-func CreateBank(conn *client.Connection) (*Bank, error) {
-	result, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		roots, err := txn.GetRootObjects()
-		if err != nil {
-			return nil, err
-		}
-		rootObj, found := roots["myRoot1"]
-		if !found {
+func CreateBank(txr client.Transactor) (*Bank, error) {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		rootObj := txn.Root("myRoot1")
+		if rootObj == nil {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		return rootObj, rootObj.Set([]byte{})
+		return rootObj, txn.Write(*rootObj, []byte{})
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Bank{
-		conn:   conn,
-		objRef: result.(client.ObjectRef),
+		objRef: result.(client.RefCap),
 	}, nil
 }
 
@@ -39,7 +33,7 @@ func CreateBank(conn *client.Connection) (*Bank, error) {
 // {{define "ea865ae7-bffe-4be4-a2f8-3193f8664d33"}}
 type Account struct {
 	Bank   *Bank
-	objRef client.ObjectRef
+	objRef client.RefCap
 	*account
 }
 
@@ -49,59 +43,49 @@ type account struct {
 	Balance       int
 }
 
-func (b *Bank) AddAccount(name string) (*Account, error) {
+func (b *Bank) AddAccount(txr client.Transactor, name string) (*Account, error) {
 	acc := &account{
 		Name:    name,
 		Balance: 0,
 	}
-	accObjRef, _, err := b.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		bankObj, err := txn.GetObject(b.objRef)
-		if err != nil {
+	accObjRef, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		if _, accounts, err := txn.Read(b.objRef); err != nil || txn.RestartNeeded() {
 			return nil, err
+		} else {
+			acc.AccountNumber = uint(len(accounts))
+			if accValue, err := json.Marshal(acc); err != nil {
+				return nil, err
+			} else if accObjRef, err := txn.Create(accValue); err != nil || txn.RestartNeeded() {
+				return nil, err
+			} else {
+				return accObjRef, txn.Write(b.objRef, []byte{}, append(accounts, accObjRef)...)
+			}
 		}
-		accounts, err := bankObj.References()
-		if err != nil {
-			return nil, err
-		}
-		acc.AccountNumber = uint(len(accounts))
-		accValue, err := json.Marshal(acc)
-		if err != nil {
-			return nil, err
-		}
-		accObjRef, err := txn.CreateObject(accValue)
-		if err != nil {
-			return nil, err
-		}
-		return accObjRef, bankObj.Set([]byte{}, append(accounts, accObjRef)...)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Account{
 		Bank:    b,
-		objRef:  accObjRef.(client.ObjectRef),
+		objRef:  accObjRef.(client.RefCap),
 		account: acc,
 	}, nil
 }
 
 // {{end}}
 // {{define "841d6b23-413d-454b-80fa-790893977b38"}}
-func (b *Bank) GetAccount(accNum uint) (*Account, error) {
+func (b *Bank) GetAccount(txr client.Transactor, accNum uint) (*Account, error) {
 	acc := &account{}
-	result, _, err := b.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		bankObj, err := txn.GetObject(b.objRef)
-		if err != nil {
-			return nil, err
-		}
-		if accounts, err := bankObj.References(); err != nil {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		if _, accounts, err := txn.Read(b.objRef); err != nil || txn.RestartNeeded() {
 			return nil, err
 		} else if accNum < uint(len(accounts)) {
 			accObjRef := accounts[accNum]
-			accValue, err := accObjRef.Value()
-			if err != nil {
+			if accValue, _, err := txn.Read(accObjRef); err != nil || txn.RestartNeeded() {
 				return nil, err
+			} else {
+				return accObjRef, json.Unmarshal(accValue, acc)
 			}
-			return accObjRef, json.Unmarshal(accValue, acc)
 		} else {
 			return nil, fmt.Errorf("Unknown account number: %v", accNum)
 		}
@@ -111,7 +95,7 @@ func (b *Bank) GetAccount(accNum uint) (*Account, error) {
 	}
 	return &Account{
 		Bank:    b,
-		objRef:  result.(client.ObjectRef),
+		objRef:  result.(client.RefCap),
 		account: acc,
 	}, nil
 }
@@ -124,50 +108,42 @@ type transfer struct {
 }
 
 type Transfer struct {
-	objRef client.ObjectRef
+	objRef client.RefCap
 	From   *Account
 	To     *Account
 	*transfer
 }
 
-func (dest *Account) TransferFrom(src *Account, amount int) (*Transfer, error) {
+func (dest *Account) TransferFrom(txr client.Transactor, src *Account, amount int) (*Transfer, error) {
 	if src != nil {
 		if src.AccountNumber == dest.AccountNumber {
 			return nil, fmt.Errorf("Transfer is from and to the same account: %v", src.AccountNumber)
 		}
-		if !src.Bank.objRef.ReferencesSameAs(dest.Bank.objRef) {
+		if !src.Bank.objRef.SameReferent(dest.Bank.objRef) {
 			return nil, fmt.Errorf("Transfer is not within the same bank!")
 		}
 	}
 	t := &transfer{Amount: amount}
-	result, _, err := dest.Bank.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
 		t.Time = time.Now() // first, let's create the transfer object
 		transferValue, err := json.Marshal(t)
 		if err != nil {
 			return nil, err
 		}
-		destAccObjRef, err := txn.GetObject(dest.objRef)
-		if err != nil {
-			return nil, err
-		}
 
 		// the transfer has at least a reference to the destination account
-		transferReferences := []client.ObjectRef{destAccObjRef}
-		transferObj, err := txn.CreateObject(transferValue, transferReferences...)
-		if err != nil {
+		transferReferences := []client.RefCap{dest.objRef}
+		transferObj, err := txn.Create(transferValue, transferReferences...)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 
-		destReferences, err := destAccObjRef.References() // now we must update the dest account
-		if err != nil {
+		destValue, destReferences, err := txn.Read(dest.objRef) // now we must update the dest account
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		// append our transfer to the list of destination transfers
 		destReferences = append(destReferences, transferObj)
-		destValue, err := destAccObjRef.Value()
-		if err != nil {
-			return nil, err
-		}
 		destAcc := &account{}
 		if err = json.Unmarshal(destValue, destAcc); err != nil {
 			return nil, err
@@ -177,25 +153,17 @@ func (dest *Account) TransferFrom(src *Account, amount int) (*Transfer, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = destAccObjRef.Set(destValue, destReferences...); err != nil {
+		if err = txn.Write(dest.objRef, destValue, destReferences...); err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 
 		if src != nil { // if we have a src, we must update the source account
-			srcAccObjRef, err := txn.GetObject(src.objRef)
-			if err != nil {
-				return nil, err
-			}
-			srcReferences, err := srcAccObjRef.References()
-			if err != nil {
+			srcValue, srcReferences, err := txn.Read(src.objRef)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			// append our transfer to the list of source transfers
 			srcReferences = append(srcReferences, transferObj)
-			srcValue, err := srcAccObjRef.Value()
-			if err != nil {
-				return nil, err
-			}
 			srcAcc := &account{}
 			if err = json.Unmarshal(srcValue, srcAcc); err != nil {
 				return nil, err
@@ -209,12 +177,12 @@ func (dest *Account) TransferFrom(src *Account, amount int) (*Transfer, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err = srcAccObjRef.Set(srcValue, srcReferences...); err != nil {
+			if err = txn.Write(src.objRef, srcValue, srcReferences...); err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			// there is a source so add a ref from the transfer to the source account
-			transferReferences = append(transferReferences, srcAccObjRef)
-			if err = transferObj.Set(transferValue, transferReferences...); err != nil {
+			transferReferences = append(transferReferences, src.objRef)
+			if err = txn.Write(transferObj, transferValue, transferReferences...); err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 		}
@@ -226,7 +194,7 @@ func (dest *Account) TransferFrom(src *Account, amount int) (*Transfer, error) {
 		return nil, err
 	}
 	return &Transfer{
-		objRef:   result.(client.ObjectRef),
+		objRef:   result.(client.RefCap),
 		From:     src,
 		To:       dest,
 		transfer: t,
@@ -235,13 +203,13 @@ func (dest *Account) TransferFrom(src *Account, amount int) (*Transfer, error) {
 
 // {{end}}
 // {{define "9ef6324a-d118-4882-ae2e-d7ac3ce55270"}}
-func (b *Bank) CashDeposit(accNum uint, amount int) (*Transfer, error) {
-	result, _, err := b.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		account, err := b.GetAccount(accNum)
-		if err != nil {
+func (b *Bank) CashDeposit(txr client.Transactor, accNum uint, amount int) (*Transfer, error) {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		destAccount, err := b.GetAccount(txn, accNum)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		return account.TransferFrom(nil, amount)
+		return destAccount.TransferFrom(txn, nil, amount)
 	})
 	if err != nil {
 		return nil, err
@@ -249,17 +217,17 @@ func (b *Bank) CashDeposit(accNum uint, amount int) (*Transfer, error) {
 	return result.(*Transfer), nil
 }
 
-func (b *Bank) TransferBetweenAccounts(srcAccNum, destAccNum uint, amount int) (*Transfer, error) {
-	result, _, err := b.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		srcAccount, err := b.GetAccount(srcAccNum)
-		if err != nil {
+func (b *Bank) TransferBetweenAccounts(txr client.Transactor, srcAccNum, destAccNum uint, amount int) (*Transfer, error) {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		srcAccount, err := b.GetAccount(txn, srcAccNum)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		destAccount, err := b.GetAccount(destAccNum)
-		if err != nil {
+		destAccount, err := b.GetAccount(txn, destAccNum)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		return destAccount.TransferFrom(srcAccount, amount)
+		return destAccount.TransferFrom(txn, srcAccount, amount)
 	})
 	if err != nil {
 		return nil, err

@@ -14,42 +14,35 @@ const (
 )
 
 func main() {
-	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 	if err != nil {
+		fmt.Println(err)
 		return
 	}
-	defer conn.Shutdown()
+	defer conn.ShutdownSync()
 
-	result, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		rootObjs, err := txn.GetRootObjects()
-		if err != nil {
-			return nil, err
-		}
-		rootObj, found := rootObjs["myRoot1"]
-		if !found {
+	result, err := conn.Transact(func(txn *client.Transaction) (interface{}, error) {
+		rootObj := txn.Root("myRoot1")
+		if rootObj == nil {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
 		value := make([]byte, 8)
 		binary.LittleEndian.PutUint64(value, 42)
-		err = rootObj.Set(value)
-		if err != nil {
+		err = txn.Write(*rootObj, value)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		return "success!", nil
 	})
 	fmt.Println(result, err)
 
-	result, _, err = conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		rootObjs, err := txn.GetRootObjects()
-		if err != nil {
-			return nil, err
-		}
-		rootObj, found := rootObjs["myRoot1"]
-		if !found {
+	result, err = conn.Transact(func(txn *client.Transaction) (interface{}, error) {
+		rootObj := txn.Root("myRoot1")
+		if rootObj == nil {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		value, err := rootObj.Value()
-		if err != nil {
+		value, _, err := txn.Read(*rootObj)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		return fmt.Sprintf("Found value: %v", binary.LittleEndian.Uint64(value)), nil
