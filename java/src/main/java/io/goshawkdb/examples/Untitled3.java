@@ -7,8 +7,9 @@ import java.nio.ByteBuffer;
 import io.goshawkdb.client.Certs;
 import io.goshawkdb.client.Connection;
 import io.goshawkdb.client.ConnectionFactory;
-import io.goshawkdb.client.GoshawkObjRef;
+import io.goshawkdb.client.RefCap;
 import io.goshawkdb.client.TransactionResult;
+import io.goshawkdb.client.ValueRefs;
 
 public class Untitled3 {
     private static final String clusterCert = "...";
@@ -21,25 +22,28 @@ public class Untitled3 {
         try (ConnectionFactory cf = new ConnectionFactory()) {
             try (Connection conn = cf.connect(certs, "hostname")) {
 
-                TransactionResult<String> outcome = conn.runTransaction(txn -> {
-                    GoshawkObjRef root = txn.getRoots().get("myRoot1");
-                    if (root == null) {
+                TransactionResult<String> outcome = conn.transact(txn -> {
+                    RefCap rootRef = txn.root("myRoot1");
+                    if (rootRef == null) {
                         throw new RuntimeException("No root 'myRoot1' found");
                     }
-                    root.set(ByteBuffer.wrap("Hello".getBytes()));
+                    txn.write(rootRef, ByteBuffer.wrap("Hello".getBytes()));
                     return "success!";
                 });
                 System.out.println("" + outcome.result + ", " + outcome.cause);
                 outcome.getResultOrRethrow();
 
-                outcome = conn.runTransaction(txn -> {
-                    GoshawkObjRef root = txn.getRoots().get("myRoot1");
-                    if (root == null) {
+                outcome = conn.transact(txn -> {
+                    RefCap rootRef = txn.root("myRoot1");
+                    if (rootRef == null) {
                         throw new RuntimeException("No root 'myRoot1' found");
                     }
-                    ByteBuffer val = root.getValue();
-                    byte[] ary = new byte[val.limit()];
-                    val.get(ary);
+                    ValueRefs rootValueRefs = txn.read(rootRef);
+                    if (txn.restartNeeded()) {
+                        return null;
+                    }
+                    byte[] ary = new byte[rootValueRefs.value.limit()];
+                    rootValueRefs.value.get(ary);
                     return new String(ary);
                 });
                 System.out.println("Found: " + outcome.result + ", " + outcome.cause);
