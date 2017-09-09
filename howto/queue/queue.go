@@ -20,15 +20,15 @@ const (
 
 func NewQueue(txr client.Transactor) (*Queue, error) {
 	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
-		rootObj := txn.Root("myRoot1")
-		if rootObj == nil {
+		rootObj, found := txn.Root("myRoot1")
+		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		err := txn.Write(*rootObj, []byte{})
+		err := txn.Write(rootObj, []byte{})
 		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		return *rootObj, nil
+		return rootObj, nil
 	})
 	if err != nil {
 		return nil, err

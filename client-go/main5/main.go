@@ -33,12 +33,12 @@ func main() {
 		fmt.Println("Producer starting")
 		for i := uint64(0); i < limit; i++ {
 			_, err := conn2.Transact(func(txn *client.Transaction) (interface{}, error) {
-				rootObj := txn.Root("myRoot1")
-				if rootObj == nil {
+				rootObj, found := txn.Root("myRoot1")
+				if !found {
 					return nil, errors.New("No root 'myRoot1' found")
 				}
 				binary.LittleEndian.PutUint64(buf, i)
-				return nil, txn.Write(*rootObj, buf)
+				return nil, txn.Write(rootObj, buf)
 			})
 			if err != nil {
 				fmt.Println(err)
@@ -51,11 +51,11 @@ func main() {
 	retrieved := uint64(0)
 	for retrieved+1 != limit { // consumer
 		result, err := conn1.Transact(func(txn *client.Transaction) (interface{}, error) {
-			rootObj := txn.Root("myRoot1")
-			if rootObj == nil {
+			rootObj, found := txn.Root("myRoot1")
+			if !found {
 				return nil, errors.New("No root 'myRoot1' found")
 			}
-			value, _, err := txn.Read(*rootObj)
+			value, _, err := txn.Read(rootObj)
 			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}

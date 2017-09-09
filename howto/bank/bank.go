@@ -15,11 +15,11 @@ type Bank struct {
 
 func CreateBank(txr client.Transactor) (*Bank, error) {
 	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
-		rootObj := txn.Root("myRoot1")
-		if rootObj == nil {
+		rootObj, found := txn.Root("myRoot1")
+		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		return rootObj, txn.Write(*rootObj, []byte{})
+		return rootObj, txn.Write(rootObj, []byte{})
 	})
 	if err != nil {
 		return nil, err

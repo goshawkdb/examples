@@ -22,13 +22,13 @@ func main() {
 	defer conn.ShutdownSync()
 
 	result, err := conn.Transact(func(txn *client.Transaction) (interface{}, error) {
-		rootObj := txn.Root("myRoot1")
-		if rootObj == nil {
+		rootObj, found := txn.Root("myRoot1")
+		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
 		value := make([]byte, 8)
 		binary.LittleEndian.PutUint64(value, 42)
-		err = txn.Write(*rootObj, value)
+		err = txn.Write(rootObj, value)
 		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
@@ -37,11 +37,11 @@ func main() {
 	fmt.Println(result, err)
 
 	result, err = conn.Transact(func(txn *client.Transaction) (interface{}, error) {
-		rootObj := txn.Root("myRoot1")
-		if rootObj == nil {
+		rootObj, found := txn.Root("myRoot1")
+		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		value, _, err := txn.Read(*rootObj)
+		value, _, err := txn.Read(rootObj)
 		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
