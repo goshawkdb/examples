@@ -7,8 +7,9 @@ import java.nio.ByteBuffer;
 import io.goshawkdb.client.Certs;
 import io.goshawkdb.client.Connection;
 import io.goshawkdb.client.ConnectionFactory;
-import io.goshawkdb.client.GoshawkObjRef;
+import io.goshawkdb.client.RefCap;
 import io.goshawkdb.client.TransactionResult;
+import io.goshawkdb.client.ValueRefs;
 
 public class Untitled4 {
     private static final String clusterCert = "...";
@@ -21,27 +22,37 @@ public class Untitled4 {
         try (ConnectionFactory cf = new ConnectionFactory()) {
             try (Connection conn = cf.connect(certs, "hostname")) {
 
-                TransactionResult<String> outcome = conn.runTransaction(txn -> {
-                    GoshawkObjRef root = txn.getRoots().get("myRoot1");
-                    if (root == null) {
+                TransactionResult<String> outcome = conn.transact(txn -> {
+                    RefCap rootRef = txn.root("myRoot1");
+                    if (rootRef == null) {
                         throw new RuntimeException("No root 'myRoot1' found");
                     }
-                    GoshawkObjRef obj = txn.createObject(ByteBuffer.wrap("a new value for a new object".getBytes()));
-                    root.set(null, obj); // root now has a single reference to our new object
+                    RefCap objRef = txn.create(ByteBuffer.wrap("a new value for a new object".getBytes()));
+                    if (txn.restartNeeded()) {
+                        return null;
+                    }
+                    txn.write(rootRef, null, objRef); // root now has a single reference to our new object
                     return "success!";
                 });
                 System.out.println("" + outcome.result + ", " + outcome.cause);
                 outcome.getResultOrRethrow();
 
-                outcome = conn.runTransaction(txn -> {
-                    GoshawkObjRef root = txn.getRoots().get("myRoot1");
-                    if (root == null) {
+                outcome = conn.transact(txn -> {
+                    RefCap rootRef = txn.root("myRoot1");
+                    if (rootRef == null) {
                         throw new RuntimeException("No root 'myRoot1' found");
                     }
-                    GoshawkObjRef[] objs = root.getReferences();
-                    ByteBuffer val = objs[0].getValue();
-                    byte[] ary = new byte[val.limit()];
-                    val.get(ary);
+                    ValueRefs rootValueRefs = txn.read(rootRef);
+                    if (txn.restartNeeded()) {
+                        return null;
+                    }
+                    RefCap objRef = rootValueRefs.references[0];
+                    ValueRefs objValueRefs = txn.read(objRef);
+                    if (txn.restartNeeded()) {
+                        return null;
+                    }
+                    byte[] ary = new byte[objValueRefs.value.limit()];
+                    objValueRefs.value.get(ary);
                     return new String(ary);
                 });
                 System.out.println("Found: " + outcome.result + ", " + outcome.cause);

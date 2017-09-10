@@ -7,9 +7,9 @@ import (
 )
 
 type Game struct {
-	objId   client.ObjectRef
-	playerA client.ObjectRef
-	playerB client.ObjectRef
+	objId   client.RefCap
+	playerA client.RefCap
+	playerB client.RefCap
 }
 
 const (
@@ -17,7 +17,7 @@ const (
 	boardYDim = 10
 )
 
-func (p *Player) PlaceBoat(x, y, boatLength uint, vertical bool) error {
+func (p *Player) PlaceBoat(txr client.Transactor, x, y, boatLength uint, vertical bool) error {
 	switch {
 	case vertical && y+boatLength >= boardYDim:
 		return fmt.Errorf("Illegal position for boat")
@@ -34,55 +34,41 @@ func (p *Player) PlaceBoat(x, y, boatLength uint, vertical bool) error {
 			cellIndices[idx] = y*boardXDim + x + uint(idx)
 		}
 	}
-	_, _, err := p.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		boardObj, err := txn.GetObject(p.board)
-		if err != nil {
+	_, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		_, boardCells, err := txn.Read(p.board)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		boardCells, err := boardObj.References()
-		if err != nil {
-			return nil, err
-		}
-		boatsObj, err := txn.GetObject(p.boats)
-		if err != nil {
-			return nil, err
-		}
-		boatsObjReferences, err := boatsObj.References()
-		if err != nil {
+		_, boatsObjRefs, err := txn.Read(p.boats)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		for _, index := range cellIndices {
 			cell := boardCells[index]
-			boatsObjReferences = append(boatsObjReferences, cell)
+			boatsObjRefs = append(boatsObjRefs, cell)
 		}
-		boatsObj.Set([]byte{}, boatsObjReferences...)
-		return nil, nil
+		return nil, txn.Write(p.boats, []byte{}, boatsObjRefs...)
 	})
 	return err
 }
 
 // {{define "bfd6d594-76a4-4a19-8149-667a93f645d9"}}
 type Player struct {
-	conn          *client.Connection
-	board         client.ObjectRef
-	boats         client.ObjectRef
-	opponentBoard client.ObjectRef
+	board         client.RefCap
+	boats         client.RefCap
+	opponentBoard client.RefCap
 	shotQueue     *queue.Queue
 }
 
-func (p *Player) Shoot(x, y uint) (bool, error) {
+func (p *Player) Shoot(txr client.Transactor, x, y uint) (bool, error) {
 	cellIndex := y*boardXDim + x
-	result, _, err := p.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		boardObj, err := txn.GetObject(p.opponentBoard)
-		if err != nil {
-			return nil, err
-		}
-		boardCells, err := boardObj.References()
-		if err != nil {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		_, boardCells, err := txn.Read(p.opponentBoard)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		cell := boardCells[cellIndex]
-		if cellValue, err := cell.Value(); err != nil {
+		if cellValue, _, err := txn.Read(cell); err != nil || txn.RestartNeeded() {
 			return nil, err
 		} else if len(cellValue) != 0 {
 			return nil, fmt.Errorf("Illegal shot: already been shot!")
@@ -93,23 +79,19 @@ func (p *Player) Shoot(x, y uint) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cell := result.(client.ObjectRef)
-	if err = p.shotQueue.Append(cell); err != nil {
+	cell := result.(client.RefCap)
+	if err = p.shotQueue.Append(txr, cell); err != nil {
 		return false, err
 	}
-	result, _, err = p.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		cell, err := txn.GetObject(cell)
-		if err != nil {
-			return nil, err
-		}
-		if cellValue, err := cell.Value(); err != nil {
+	result, err = txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		if cellValue, _, err := txn.Read(cell); err != nil || txn.RestartNeeded() {
 			return nil, err
 		} else if len(cellValue) != 0 {
 			// shot has been carried out. Referee would have written a 1 if we hit.
 			return cellValue[0] == 1, nil
 		} else {
 			// shot has not happend yet
-			return client.Retry, nil
+			return nil, txn.Retry()
 		}
 	})
 	if err != nil {
@@ -121,30 +103,29 @@ func (p *Player) Shoot(x, y uint) (bool, error) {
 // {{end}}
 // {{define "6aacfa5f-015a-4196-b970-6d115b44b37a"}}
 type Referee struct {
-	conn             *client.Connection
-	playerABoats     []client.ObjectRef
-	playerBBoats     []client.ObjectRef
+	playerABoats     []client.RefCap
+	playerBBoats     []client.RefCap
 	playerAShotQueue *queue.Queue
 	playerBShotQueue *queue.Queue
 }
 
-func (r *Referee) Run() error {
+func (r *Referee) Run(txr client.Transactor) error {
 	turnQ, notTurnQ := r.playerAShotQueue, r.playerBShotQueue
 	turnBoats, notTurnBoats := r.playerBBoats, r.playerABoats
 	for len(turnBoats) != 0 && len(notTurnBoats) != 0 {
-		result, _, err := r.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-			cell, err := turnQ.Dequeue()
-			if err != nil {
+		result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+			cell, err := turnQ.Dequeue(txn)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			shotOutcome := []byte{0}
 			for i, boatCell := range turnBoats {
-				if cell.ReferencesSameAs(boatCell) {
+				if cell.SameReferent(boatCell) {
 					shotOutcome[0] = 1 // hit!
-					return i, cell.Set(shotOutcome)
+					return i, txn.Write(cell, shotOutcome)
 				}
 			}
-			return nil, cell.Set(shotOutcome) // miss
+			return nil, txn.Write(cell, shotOutcome) // miss
 		})
 		if err != nil {
 			return err

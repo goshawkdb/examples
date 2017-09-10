@@ -7,8 +7,7 @@ import (
 )
 
 type Queue struct {
-	conn   *client.Connection
-	objRef client.ObjectRef
+	objRef client.RefCap
 }
 
 const (
@@ -19,18 +18,14 @@ const (
 	cellNext  = 1
 )
 
-func NewQueue(conn *client.Connection) (*Queue, error) {
-	result, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		roots, err := txn.GetRootObjects()
-		if err != nil {
-			return nil, err
-		}
-		rootObj, found := roots["myRoot1"]
+func NewQueue(txr client.Transactor) (*Queue, error) {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		rootObj, found := txn.Root("myRoot1")
 		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		err = rootObj.Set([]byte{})
-		if err != nil {
+		err := txn.Write(rootObj, []byte{})
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		return rootObj, nil
@@ -39,44 +34,39 @@ func NewQueue(conn *client.Connection) (*Queue, error) {
 		return nil, err
 	}
 	return &Queue{
-		conn:   conn,
-		objRef: result.(client.ObjectRef),
+		objRef: result.(client.RefCap),
 	}, nil
 }
 
-func (q *Queue) Append(item client.ObjectRef) error {
-	_, _, err := q.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		queue, err := txn.GetObject(q.objRef)
-		if err != nil {
-			return nil, err
-		}
+func (q *Queue) Append(txr client.Transactor, item client.RefCap) error {
+	_, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
 		// create a new cell that only has a ref to the value being appended.
-		cell, err := txn.CreateObject([]byte{}, item)
-		if err != nil {
+		cell, err := txn.Create([]byte{}, item)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		queueReferences, err := queue.References()
-		if err != nil {
+		_, queueRefs, err := txn.Read(q.objRef)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		if len(queueReferences) == 0 {
+		if len(queueRefs) == 0 {
 			// queue is completely empty: set both head and tail at once.
-			return nil, queue.Set([]byte{}, cell, cell)
+			return nil, txn.Write(q.objRef, []byte{}, cell, cell)
 
 		} else {
-			tailCell := queueReferences[queueTail]
-			tailCellReferences, err := tailCell.References()
-			if err != nil {
+			tailCell := queueRefs[queueTail]
+			_, tailCellRefs, err := txn.Read(tailCell)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			// append our new cell to the refs of the current tail
-			err = tailCell.Set([]byte{}, append(tailCellReferences, cell)...)
-			if err != nil {
+			err = txn.Write(tailCell, []byte{}, append(tailCellRefs, cell)...)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			// update the queue tail to point at the new tail.
-			queueReferences[queueTail] = cell
-			return nil, queue.Set([]byte{}, queueReferences...)
+			queueRefs[queueTail] = cell
+			return nil, txn.Write(q.objRef, []byte{}, queueRefs...)
 		}
 	})
 	return err
@@ -84,54 +74,40 @@ func (q *Queue) Append(item client.ObjectRef) error {
 
 // {{end}}
 // {{define "6dee71c7-41e8-4b3a-8a62-f92d1444bd2e"}}
-func (q *Queue) Dequeue() (*client.ObjectRef, error) {
-	result, _, err := q.conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		queue, err := txn.GetObject(q.objRef)
-		if err != nil {
+func (q *Queue) Dequeue(txr client.Transactor) (client.RefCap, error) {
+	result, err := txr.Transact(func(txn *client.Transaction) (interface{}, error) {
+		_, queueRefs, err := txn.Read(q.objRef)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		queueReferences, err := queue.References()
-		if err != nil {
-			return nil, err
-		}
-		if len(queueReferences) == 0 {
+		if len(queueRefs) == 0 {
 			// queue is completely empty; Let's wait until it's not!
-			return client.Retry, nil
+			return nil, txn.Retry()
 
 		} else {
-			headCell := queueReferences[queueHead]
-			headCellReferences, err := headCell.References()
-			if err != nil {
+			headCell := queueRefs[queueHead]
+			_, headCellRefs, err := txn.Read(headCell)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
-			item := headCellReferences[cellValue]
-			if len(headCellReferences) == 1 {
+			item := headCellRefs[cellValue]
+			if len(headCellRefs) == 1 {
 				// there's only one item in the queue and we've just
 				// consumed it, so remove all references from the queue
-				return item, queue.Set([]byte{})
+				return item, txn.Write(q.objRef, []byte{})
 
 			} else {
 				// the queue head should point to the next cell. The queue
 				// tail doesn't change.
-				queueReferences[queueHead] = headCellReferences[cellNext]
-				return item, queue.Set([]byte{}, queueReferences...)
+				queueRefs[queueHead] = headCellRefs[cellNext]
+				return item, txn.Write(q.objRef, []byte{}, queueRefs...)
 			}
 		}
 	})
 	if err != nil {
-		return nil, err
+		return client.RefCap{}, err
 	}
-	itemRef := result.(client.ObjectRef)
-	return &itemRef, nil
-}
-
-// {{end}}
-// {{define "f331337e-8789-4c96-8874-7788ae190c0c"}}
-func (q *Queue) Clone(conn *client.Connection) *Queue {
-	return &Queue{
-		conn:   conn,
-		objRef: q.objRef,
-	}
+	return result.(client.RefCap), nil
 }
 
 // {{end}}

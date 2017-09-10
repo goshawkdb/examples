@@ -13,47 +13,39 @@ const (
 )
 
 func main() {
-	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	defer conn.Shutdown()
+	defer conn.ShutdownSync()
 
-	result, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		rootObjs, err := txn.GetRootObjects()
-		if err != nil {
-			return nil, err
-		}
-		rootObj, found := rootObjs["myRoot1"]
+	result, err := conn.Transact(func(txn *client.Transaction) (interface{}, error) {
+		rootObj, found := txn.Root("myRoot1")
 		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		myObj, err := txn.CreateObject([]byte("a new value for a new object"))
-		if err != nil {
+		myObj, err := txn.Create([]byte("a new value for a new object"))
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
-		rootObj.Set([]byte{}, myObj) // Root now has no value and one reference
-		return "success!", nil
+		err = txn.Write(rootObj, nil, myObj) // Root now has no value and one reference
+		return "success!", err
 	})
 	fmt.Println(result, err)
 
-	result, _, err = conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-		rootObjs, err := txn.GetRootObjects()
-		if err != nil {
-			return nil, err
-		}
-		rootObj, found := rootObjs["myRoot1"]
+	result, err = conn.Transact(func(txn *client.Transaction) (interface{}, error) {
+		rootObj, found := txn.Root("myRoot1")
 		if !found {
 			return nil, errors.New("No root 'myRoot1' found")
 		}
-		refs, err := rootObj.References()
-		if err != nil {
+		_, refs, err := txn.Read(rootObj)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		myObj := refs[0]
-		value, err := myObj.Value()
-		if err != nil {
+		value, _, err := txn.Read(myObj)
+		if err != nil || txn.RestartNeeded() {
 			return nil, err
 		}
 		return fmt.Sprintf("Found value: %s", value), nil

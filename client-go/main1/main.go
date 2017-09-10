@@ -39,12 +39,12 @@ uYe5KPLwvAklFGOj0YmrsoPpmawr0/2xeA==
 )
 
 func main() {
-	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	defer conn.Shutdown()
+	defer conn.ShutdownSync()
 	// now do some work
 }
 

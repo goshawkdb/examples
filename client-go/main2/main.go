@@ -12,13 +12,13 @@ const (
 )
 
 func main() {
-	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+	conn, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	defer conn.Shutdown()
-	result, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
+	defer conn.ShutdownSync()
+	result, err := conn.Transact(func(txn *client.Transaction) (interface{}, error) {
 		return "hello", nil
 	})
 	fmt.Println(result, err)

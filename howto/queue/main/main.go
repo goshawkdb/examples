@@ -24,12 +24,12 @@ func main() {
 	producers := connections[consumerCount:]
 
 	for i := range connections {
-		conn, err := client.NewConnection("localhost", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+		conn, err := client.NewConnection("localhost", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 		if err != nil {
 			log.Fatal(err)
 		}
 		connections[i] = conn
-		defer conn.Shutdown()
+		defer conn.ShutdownSync()
 	}
 
 	q, err := queue.NewQueue(connections[0])
@@ -55,15 +55,14 @@ func main() {
 }
 
 func consume(consumerId int, conn *client.Connection, q *queue.Queue) {
-	q = q.Clone(conn)
 	for {
-		result, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-			item, err := q.Dequeue()
-			if err != nil {
+		result, err := conn.Transact(func(txn *client.Transaction) (interface{}, error) {
+			item, err := q.Dequeue(txn)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
-			itemValue, err := item.Value()
-			if err != nil {
+			itemValue, _, err := txn.Read(item)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			return itemValue, nil
@@ -76,15 +75,14 @@ func consume(consumerId int, conn *client.Connection, q *queue.Queue) {
 }
 
 func produce(producerId int, conn *client.Connection, q *queue.Queue, limit int) {
-	q = q.Clone(conn)
 	for i := 0; i < limit; i++ {
-		_, _, err := conn.RunTransaction(func(txn *client.Txn) (interface{}, error) {
+		_, err := conn.Transact(func(txn *client.Transaction) (interface{}, error) {
 			itemValue := []byte(fmt.Sprintf("producer %v item %v", producerId, i))
-			item, err := txn.CreateObject(itemValue)
-			if err != nil {
+			item, err := txn.Create(itemValue)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
-			return nil, q.Append(item)
+			return nil, q.Append(txn, item)
 		})
 		if err != nil {
 			log.Fatal(err)

@@ -14,13 +14,13 @@ const (
 )
 
 func main() {
-	conn1, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+	conn1, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	defer conn1.Shutdown()
-	conn2, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM))
+	defer conn1.ShutdownSync()
+	conn2, err := client.NewConnection("hostname:7894", []byte(clientCertAndKeyPEM), []byte(clusterCertPEM), nil)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -28,21 +28,17 @@ func main() {
 
 	limit := uint64(1000)
 	go func() { // producer
-		defer conn2.Shutdown()
+		defer conn2.ShutdownSync()
 		buf := make([]byte, 8)
 		fmt.Println("Producer starting")
 		for i := uint64(0); i < limit; i++ {
-			_, _, err := conn2.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-				rootObjs, err := txn.GetRootObjects()
-				if err != nil {
-					return nil, err
-				}
-				rootObj, found := rootObjs["myRoot1"]
+			_, err := conn2.Transact(func(txn *client.Transaction) (interface{}, error) {
+				rootObj, found := txn.Root("myRoot1")
 				if !found {
 					return nil, errors.New("No root 'myRoot1' found")
 				}
 				binary.LittleEndian.PutUint64(buf, i)
-				return nil, rootObj.Set(buf)
+				return nil, txn.Write(rootObj, buf)
 			})
 			if err != nil {
 				fmt.Println(err)
@@ -54,26 +50,22 @@ func main() {
 
 	retrieved := uint64(0)
 	for retrieved+1 != limit { // consumer
-		result, _, err := conn1.RunTransaction(func(txn *client.Txn) (interface{}, error) {
-			rootObjs, err := txn.GetRootObjects()
-			if err != nil {
-				return nil, err
-			}
-			rootObj, found := rootObjs["myRoot1"]
+		result, err := conn1.Transact(func(txn *client.Transaction) (interface{}, error) {
+			rootObj, found := txn.Root("myRoot1")
 			if !found {
 				return nil, errors.New("No root 'myRoot1' found")
 			}
-			value, err := rootObj.Value()
-			if err != nil {
+			value, _, err := txn.Read(rootObj)
+			if err != nil || txn.RestartNeeded() {
 				return nil, err
 			}
 			if len(value) == 0 {
 				// the producer hasn't written anything yet: go to sleep!
-				return client.Retry, nil
+				return nil, txn.Retry()
 			}
 			num := binary.LittleEndian.Uint64(value)
 			if num == retrieved { // nothing's changed since we last read the root, go to sleep!
-				return client.Retry, nil
+				return nil, txn.Retry()
 			} else {
 				return num, nil
 			}
